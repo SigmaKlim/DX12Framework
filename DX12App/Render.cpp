@@ -1,4 +1,5 @@
 #include "Render.h"
+#include <iostream>
 #include <cassert>
 
 #define RND_ASSERT assert(_lastError == S_OK)
@@ -10,7 +11,7 @@ Render::Render(unsigned wndWidth, unsigned wndHeight) : _wndWidth(wndWidth), _wn
 Render::~Render()
 {
 	if (_device != NULL)
-		FlushCommandQueue(); //Let the comman queue execute all commands, before closing the window.
+		FlushCommandQueue(); //Let the command queue execute all commands before closing the window.
 }
 
 bool Render::Initialize(HWND hWindow)
@@ -101,15 +102,12 @@ bool Render::Initialize(HWND hWindow)
 	_lastError = _device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(_dsvHeap.GetAddressOf()));
 	RND_ASSERT;
 #pragma endregion
-#pragma region Create RTVs
-	ComPtr<ID3D12Resource> scBuffers[SC_NUM_BUFFERS];
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+#pragma region Create RTVs	
 	for (unsigned i = 0; i < SC_NUM_BUFFERS; i++)
 	{
-		_lastError = _swapChain->GetBuffer(i, IID_PPV_ARGS(&scBuffers[i]));
+		_lastError = _swapChain->GetBuffer(i, IID_PPV_ARGS(_scBuffers[i].GetAddressOf()));
 		RND_ASSERT;
-		_device->CreateRenderTargetView(scBuffers[i].Get(), NULL, rtvHeapHandle); //NULL for desc means description of the back bufer will be used
-		rtvHeapHandle.Offset(1, _rtvDescSize);
+		_device->CreateRenderTargetView(_scBuffers[i].Get(), NULL, GetScBufDesc(i)); //NULL for desc means description of the back buffer will be used
 	}
 #pragma endregion
 #pragma region Create DSV and DS buffer
@@ -137,58 +135,106 @@ bool Render::Initialize(HWND hWindow)
 													&dsClearVal,
 													IID_PPV_ARGS(_depthStencilBuffer.GetAddressOf()));
 	RND_ASSERT;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHeapHandle(_dsvHeap->GetCPUDescriptorHandleForHeapStart());
-	_device->CreateDepthStencilView(_depthStencilBuffer.Get(), nullptr, dsvHeapHandle);
+	_device->CreateDepthStencilView(_depthStencilBuffer.Get(), nullptr, GetDepthStencilBufDesc());
 	auto rb = CD3DX12_RESOURCE_BARRIER::Transition(_depthStencilBuffer.Get(),
 													D3D12_RESOURCE_STATE_COMMON,
 													D3D12_RESOURCE_STATE_DEPTH_WRITE);
 	_commandList->ResourceBarrier(1, &rb);
 #pragma endregion
-#pragma region Create Viewport
-	D3D12_VIEWPORT vp;
-	vp.Width = _wndWidth;
-	vp.Height = _wndHeight;
-	vp.TopLeftX = 0.0f;
-	vp.TopLeftY = 0.0f;
-	vp.MinDepth = 0.0f;
-	vp.MaxDepth = 1.0f;
-	_commandList->RSSetViewports(1, &vp);
+#pragma region Initialize Viewport
+	_viewportRect.Width	= (float)_wndWidth;
+	_viewportRect.Height	= (float)_wndHeight;
+	_viewportRect.TopLeftX = 0.0f;
+	_viewportRect.TopLeftY = 0.0f;
+	_viewportRect.MinDepth = 0.0f;
+	_viewportRect.MaxDepth = 1.0f;
 #pragma endregion
-#pragma region Create Scissors Rectangle
-	//
+#pragma region Initialize Scissors Rectangle
+	_scissorsRect.top		= 0;
+	_scissorsRect.left		= 0;
+	_scissorsRect.bottom	= _wndHeight;
+	_scissorsRect.right		= _wndWidth;
 #pragma endregion
 #pragma region Submit Command List
 	_lastError = _commandList->Close();
 	RND_ASSERT;
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
+	FlushCommandQueue();
 #pragma endregion
 	return true;
 }
 
 bool Render::Draw()
 {
-	AdvanceBackBuffer();
+	_lastError = _commandAlloc->Reset();
+	RND_ASSERT;
+	_lastError = _commandList->Reset(_commandAlloc.Get(), NULL);
+	RND_ASSERT;
+	auto bbt1 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	_commandList->ResourceBarrier(1, &bbt1);
+	_commandList->RSSetViewports(1, &_viewportRect);
+	_commandList->RSSetScissorRects(1, &_scissorsRect);
+	_commandList->ClearRenderTargetView(GetBackBufferDesc(), BB_CLEAR_COLOR, 0, NULL);
+	_commandList->ClearDepthStencilView(GetDepthStencilBufDesc(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
+	auto bbd = GetBackBufferDesc();
+	auto dsb = GetDepthStencilBufDesc();
+	_commandList->OMSetRenderTargets(1, &bbd, true, &dsb);
+
+	auto bbt2 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+	_commandList->ResourceBarrier(1, &bbt2);
+
+	_backBufferId = _backBufferId + 1 < SC_NUM_BUFFERS ? _backBufferId + 1 : 0;
+
+	_lastError = _commandList->Close();
+	RND_ASSERT;
+	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
+	_commandQueue->ExecuteCommandLists(1, cmdLists);
+
+	_lastError = _swapChain->Present(0, 0);
+	RND_ASSERT;
+
 	FlushCommandQueue();
 	return true;
 }
 
-void Render::AdvanceBackBuffer()
-{
-	_backBufferId = _backBufferId + 1 < SC_NUM_BUFFERS ? _backBufferId + 1 : 0;
-}
 
 void Render::FlushCommandQueue()
 {
 	_currentFence++;
 	_lastError = _commandQueue->Signal(_fence.Get(), _currentFence); //Submit to GPU a command to increment fence value
 	RND_ASSERT;
-	if (_fence->GetCompletedValue() < _currentFence) //unnecessary???
+	auto completedFence = _fence->GetCompletedValue();
+	if (completedFence < _currentFence) //unnecessary???
 	{
-		HANDLE eventHandle = CreateEventExA(NULL, NULL, CREATE_EVENT_INITIAL_SET, EVENT_ALL_ACCESS); 
+		HANDLE eventHandle = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
 		_lastError = _fence->SetEventOnCompletion(_currentFence, eventHandle); //Assign the event to fire when fence reaches necessary value.
 		RND_ASSERT;
 		WaitForSingleObject(eventHandle, INFINITE); //Wait until the assigned event is fired.
+		CloseHandle(eventHandle);
 	}
+}
 
+ID3D12Resource* Render::GetBackBuffer()
+{
+	return _scBuffers[_backBufferId].Get();
+}
+
+
+D3D12_CPU_DESCRIPTOR_HANDLE Render::GetBackBufferDesc()
+{
+	return GetScBufDesc(_backBufferId);
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE Render::GetScBufDesc(UINT numBuf = 0)
+{
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+	if (numBuf > 0)
+		rtvHandle.Offset(numBuf, _rtvDescSize);
+	return rtvHandle;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE Render::GetDepthStencilBufDesc()
+{
+	return D3D12_CPU_DESCRIPTOR_HANDLE(_dsvHeap->GetCPUDescriptorHandleForHeapStart());
 }
