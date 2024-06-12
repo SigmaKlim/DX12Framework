@@ -1,8 +1,15 @@
 #include "Render.h"
 #include <iostream>
 #include <cassert>
+#include <fstream>
+#include <d3dcompiler.h>
+
+#include "SBuffer.h"
+#include "VBuffer.h"
 
 #define RND_ASSERT assert(_lastError == S_OK)
+
+VBuffer0 testVBuf(eGpu);
 
 Render::Render(unsigned wndWidth, unsigned wndHeight) : _wndWidth(wndWidth), _wndHeight(wndHeight)
 {
@@ -14,7 +21,7 @@ Render::~Render()
 		FlushCommandQueue(); //Let the command queue execute all commands before closing the window.
 }
 
-bool Render::Initialize(HWND hWindow)
+bool Render::InitializeRender(HWND hWindow)
 {
 	_hWindow = hWindow;
 #pragma region Enable Debug
@@ -156,14 +163,19 @@ bool Render::Initialize(HWND hWindow)
 	_scissorsRect.right		= _wndWidth;
 #pragma endregion
 #pragma region Submit Command List
+
+	TestInit();
+
 	_lastError = _commandList->Close();
 	RND_ASSERT;
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
+
 	FlushCommandQueue();
 #pragma endregion
 	return true;
 }
+
 
 bool Render::Draw()
 {
@@ -181,9 +193,18 @@ bool Render::Draw()
 	auto dsb = GetDepthStencilBufDesc();
 	_commandList->OMSetRenderTargets(1, &bbd, true, &dsb);
 
+	//for (Model0& model : _scene->Models)
+	//{
+	//	_commandList->IASetPrimitiveTopology(model.GetPrimitiveTopology());
+	//	D3D12_VERTEX_BUFFER_VIEW rbVs[] = { model.GetVertexBufferView() };
+	//	_commandList->IASetVertexBuffers(0, 1, rbVs);
+	//	_commandList->DrawInstanced(model.GetNumVertices(),	1, 0, 0);
+	//}
+
+	TestDraw();
+
 	auto bbt2 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 	_commandList->ResourceBarrier(1, &bbt2);
-
 	_backBufferId = _backBufferId + 1 < SC_NUM_BUFFERS ? _backBufferId + 1 : 0;
 
 	_lastError = _commandList->Close();
@@ -197,6 +218,133 @@ bool Render::Draw()
 	FlushCommandQueue();
 	return true;
 }
+
+void Render::InitializeScene(Scene* scene)
+{
+	_scene = scene;
+	std::vector<ComPtr<ID3D12Resource>> updateBuffers(_scene->Models.size());
+	for (size_t i = 0; i < _scene->Models.size(); i++)
+		InitializeModel(_scene->Models[i], updateBuffers[i].GetAddressOf());
+	FlushCommandQueue();
+}
+
+void Render::TestInit()
+{
+	std::vector<Vertex0> vs(3);
+	vs[0].Position = { 0.0f, 0.5f, -1.0f };
+	vs[1].Position = { -0.5f, -0.5f, -1.0f };
+	vs[1].Position = { 0.5f, -0.5f, -1.0f };
+	vs[0].Color = { 1.0f, 0.0f, 0.0f, 1.0f };
+	vs[1].Color = { 0.0f, 1.0f, 0.0f, 1.0f };
+	vs[2].Color = { 0.0f, 0.0f, 1.0f, 1.0f };
+	ComPtr<ID3D12Resource> ubuf;
+	InitializeVBuffer(testVBuf, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST, vs, ubuf.GetAddressOf());
+
+	_commandList->Close();
+	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
+	_commandQueue->ExecuteCommandLists(1, cmdLists);
+	FlushCommandQueue();
+	_commandList->Reset(_commandAlloc.Get(), nullptr);
+}
+
+void Render::TestDraw()
+{
+	_commandList->IASetPrimitiveTopology(testVBuf.GetPrimitiveTopology());
+	D3D12_VERTEX_BUFFER_VIEW rbVs[] = { testVBuf.GetVertexBufferView() };
+	_commandList->IASetVertexBuffers(0, 1, rbVs);
+	_commandList->DrawInstanced(testVBuf.GetNumVertices(), 1, 0, 0);
+}
+
+
+void Render::InitializeVBuffer(VBuffer& buf, D3D12_PRIMITIVE_TOPOLOGY topology, D3D12_INPUT_LAYOUT_DESC inputLayoutDesc, size_t vertexByteSize, UINT64 numVertices, const void* initData, ID3D12Resource** uploadBuffer)
+{
+	buf._inputLayoutDesc = inputLayoutDesc;
+	buf._vertexSize = vertexByteSize;
+	buf._numVertices = numVertices;
+	buf._topology = topology;
+	InitializeSBuffer(buf, vertexByteSize * numVertices, initData, uploadBuffer);
+	buf._vbView.BufferLocation = buf._buf->GetGPUVirtualAddress();
+	buf._vbView.SizeInBytes = buf._byteSize;
+	buf._vbView.StrideInBytes = buf._vertexSize;
+	
+}
+
+void Render::InitializeSBuffer(SBuffer& buf, UINT64 byteSize, const void* initData, ID3D12Resource** uploadBuffer)
+{
+	assert(byteSize > 0);
+	buf._byteSize = byteSize;
+	assert(initData == NULL || buf._type != eGpu || uploadBuffer != NULL); //if we want to upload init data to a buffer which is not cpu-read-write, an upload buffer must be provided.
+	HRESULT lastError;
+	if (buf.GetType() == eGpu)
+	{
+		auto dHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+		auto dBufDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+		lastError = _device->CreateCommittedResource(
+			&dHeapProp,
+			D3D12_HEAP_FLAG_NONE,
+			&dBufDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(buf._buf.GetAddressOf()));
+		RND_ASSERT;
+	}
+	else
+		assert(0); //currently only gpu buffers are accessible
+	if (initData != NULL && buf._type == eGpu && uploadBuffer != NULL)
+	{
+		auto uHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+		auto uBufDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+		lastError = _device->CreateCommittedResource(
+			&uHeapProp,
+			D3D12_HEAP_FLAG_NONE,
+			&uBufDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(uploadBuffer));
+		RND_ASSERT;
+		D3D12_SUBRESOURCE_DATA subResourceData = {};
+		subResourceData.pData = initData;
+		subResourceData.RowPitch = byteSize;
+		subResourceData.SlicePitch = subResourceData.RowPitch;
+
+		auto bufTrans1 = CD3DX12_RESOURCE_BARRIER::Transition(buf._buf.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+		_commandList->ResourceBarrier(1, &bufTrans1);
+		auto bufTrans2 = CD3DX12_RESOURCE_BARRIER::Transition(buf._buf.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_GENERIC_READ);
+		UpdateSubresources<1>(_commandList.Get(), buf._buf.Get(), *uploadBuffer, 0, 0, 1, &subResourceData);
+		_commandList->ResourceBarrier(1, &bufTrans2);
+	}
+}
+
+void Render::LoadShaderBinaryData(Shader& shader)
+{
+	std::ifstream fin(shader._fileName, std::ios::binary);
+	assert(fin.is_open());
+	fin.seekg(0, std::ios_base::end);
+	std::ifstream::pos_type size = fin.tellg(); //assess file size
+	fin.seekg(0, std::ios_base::beg);
+	D3DCreateBlob((size_t)size, shader._byteCode.GetAddressOf());
+	fin.read((char*)shader._byteCode->GetBufferPointer(), size);
+	fin.close();
+}
+
+void Render::CompileShader(Shader& shader, E_ShaderStage stage)
+{
+	unsigned compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+	ComPtr<ID3DBlob> errors;
+	_lastError = D3DCompileFromFile(shader._fileName.c_str(),
+									nullptr,
+									D3D_COMPILE_STANDARD_FILE_INCLUDE,
+									shader._entryPointName.c_str(),
+									Shader::ShaderVersions[stage],
+									compileFlags,
+									0,
+									shader._byteCode.GetAddressOf(),
+									errors.GetAddressOf());
+	RND_ASSERT;
+	if (errors != NULL)
+		OutputDebugStringA((char*)errors->GetBufferPointer());
+}
+
 
 
 void Render::FlushCommandQueue()

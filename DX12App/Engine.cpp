@@ -8,11 +8,17 @@ Engine::Engine() : _app(_wndWidth, _wndHeight, _wndTitle, L"MyWndClass"), _rende
 
 }
 
-bool Engine::Initialize()
+bool Engine::InitializeEngine()
 {
 	assert(_app.Initialize());
-	assert(_render.Initialize(_app.GetHWnd()));
+	assert(_render.InitializeRender(_app.GetHWnd()));
 	return true;
+}
+
+void Engine::InitializeScene(Scene* scene)
+{
+	_scene = scene;
+	_render.InitializeScene(scene);
 }
 
 void Engine::BeginUpdateLoop()

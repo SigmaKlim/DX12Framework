@@ -3,11 +3,13 @@
 #include "Render.h"
 #include "Timer.h"
 #include <string>
+#include "Scene.h"
 class Engine
 {
 public:
 	Engine();
-	bool Initialize();
+	bool InitializeEngine();
+	void InitializeScene(Scene* scene);
 	void BeginUpdateLoop();
 private:
 	unsigned	 _wndWidth = 800;
@@ -18,4 +20,6 @@ private:
 	AppWindow	 _app;
 	Render		 _render;
 	Timer		 _timer;
+
+	Scene*		_scene;
 };
