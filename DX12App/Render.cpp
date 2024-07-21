@@ -4,8 +4,9 @@
 #include <fstream>
 #include <d3dcompiler.h>
 
-#include "SBuffer.h"
 #include "VBuffer.h"
+#include "Helper.h"
+#include "Hash.h"
 
 #define RND_ASSERT assert(_lastError == S_OK)
 
@@ -94,6 +95,12 @@ bool Render::InitializeRender(HWND hWindow)
 	RND_ASSERT;
 #pragma endregion
 #pragma region Create RTV and DSV Descriptor Heaps
+	//D3D12_DESCRIPTOR_HEAP_DESC cbvDesc;
+	//cbvDesc.NumDescriptors = 0;
+	//cbvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	//cbvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	//_lastError = _device->CreateDescriptorHeap(&cbvDesc, IID_PPV_ARGS(_cbvHeap.GetAddressOf()));
+
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
 	rtvHeapDesc.NumDescriptors = SC_NUM_BUFFERS;
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -114,22 +121,22 @@ bool Render::InitializeRender(HWND hWindow)
 	{
 		_lastError = _swapChain->GetBuffer(i, IID_PPV_ARGS(_scBuffers[i].GetAddressOf()));
 		RND_ASSERT;
-		_device->CreateRenderTargetView(_scBuffers[i].Get(), NULL, GetScBufDesc(i)); //NULL for desc means description of the back buffer will be used
+		_device->CreateRenderTargetView(_scBuffers[i].Get(), NULL, GetScreenBufDesc(i)); //NULL for desc means description of the back buffer will be used
 	}
 #pragma endregion
 #pragma region Create DSV and DS buffer
-	D3D12_RESOURCE_DESC dsDesc;
-	dsDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-	dsDesc.Alignment = 0;
-	dsDesc.Width = _wndWidth;
-	dsDesc.Height = _wndHeight;
-	dsDesc.DepthOrArraySize = 1;
-	dsDesc.MipLevels = 1;
-	dsDesc.Format = DEPTH_STENCIL_FORMAT;
-	dsDesc.SampleDesc.Count = _4xMsaaEnabled ? 4 : 1;
-	dsDesc.SampleDesc.Quality = _4xMsaaEnabled ? (_4xMsaaQualityLevels - 1) : 0;
-	dsDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-	dsDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+	D3D12_RESOURCE_DESC dsBufDesc;
+	dsBufDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	dsBufDesc.Alignment = 0;
+	dsBufDesc.Width = _wndWidth;
+	dsBufDesc.Height = _wndHeight;
+	dsBufDesc.DepthOrArraySize = 1;
+	dsBufDesc.MipLevels = 1;
+	dsBufDesc.Format = DEPTH_STENCIL_FORMAT;
+	dsBufDesc.SampleDesc.Count = _4xMsaaEnabled ? 4 : 1;
+	dsBufDesc.SampleDesc.Quality = _4xMsaaEnabled ? (_4xMsaaQualityLevels - 1) : 0;
+	dsBufDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	dsBufDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 	D3D12_CLEAR_VALUE dsClearVal;
 	dsClearVal.Format = DEPTH_STENCIL_FORMAT;
 	dsClearVal.DepthStencil.Depth = 1.0f;
@@ -137,7 +144,7 @@ bool Render::InitializeRender(HWND hWindow)
 	CD3DX12_HEAP_PROPERTIES heapP(D3D12_HEAP_TYPE_DEFAULT);
 	_lastError = _device->CreateCommittedResource(	&heapP,
 													D3D12_HEAP_FLAG_NONE,
-													&dsDesc,
+													&dsBufDesc,
 													D3D12_RESOURCE_STATE_COMMON,
 													&dsClearVal,
 													IID_PPV_ARGS(_depthStencilBuffer.GetAddressOf()));
@@ -162,9 +169,16 @@ bool Render::InitializeRender(HWND hWindow)
 	_scissorsRect.bottom	= _wndHeight;
 	_scissorsRect.right		= _wndWidth;
 #pragma endregion
+#pragma region Initialize Rasterizer State
+	_rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+#pragma endregion
+#pragma region Initialize Blend State
+	_blendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+#pragma endregion
+#pragma region Initialize Depth Stencil State
+	_dsState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+#pragma endregion
 #pragma region Submit Command List
-
-	TestInit();
 
 	_lastError = _commandList->Close();
 	RND_ASSERT;
@@ -176,85 +190,34 @@ bool Render::InitializeRender(HWND hWindow)
 	return true;
 }
 
-
-bool Render::Draw()
+void Render::InitializeScene(Scene* scene)
 {
-	_lastError = _commandAlloc->Reset();
-	RND_ASSERT;
-	_lastError = _commandList->Reset(_commandAlloc.Get(), NULL);
-	RND_ASSERT;
-	auto bbt1 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-	_commandList->ResourceBarrier(1, &bbt1);
-	_commandList->RSSetViewports(1, &_viewportRect);
-	_commandList->RSSetScissorRects(1, &_scissorsRect);
-	_commandList->ClearRenderTargetView(GetBackBufferDesc(), BB_CLEAR_COLOR, 0, NULL);
-	_commandList->ClearDepthStencilView(GetDepthStencilBufDesc(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
-	auto bbd = GetBackBufferDesc();
-	auto dsb = GetDepthStencilBufDesc();
-	_commandList->OMSetRenderTargets(1, &bbd, true, &dsb);
-
-	//for (Model0& model : _scene->Models)
-	//{
-	//	_commandList->IASetPrimitiveTopology(model.GetPrimitiveTopology());
-	//	D3D12_VERTEX_BUFFER_VIEW rbVs[] = { model.GetVertexBufferView() };
-	//	_commandList->IASetVertexBuffers(0, 1, rbVs);
-	//	_commandList->DrawInstanced(model.GetNumVertices(),	1, 0, 0);
-	//}
-
-	TestDraw();
-
-	auto bbt2 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-	_commandList->ResourceBarrier(1, &bbt2);
-	_backBufferId = _backBufferId + 1 < SC_NUM_BUFFERS ? _backBufferId + 1 : 0;
-
+	_commandList->Reset(_commandAlloc.Get(), NULL);
+	_scene = scene;
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC gpsDesc = {};
+	gpsDesc.BlendState = _blendState;
+	gpsDesc.DepthStencilState = _dsState;
+	gpsDesc.NumRenderTargets = 1;
+	gpsDesc.RasterizerState = _rasterizerState;
+	gpsDesc.RTVFormats[0] = BACKBUF_FORMAT;
+	gpsDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+	gpsDesc.SampleDesc.Count = _4xMsaaEnabled ? 4 : 1;
+	gpsDesc.SampleDesc.Quality = _4xMsaaEnabled ? (_4xMsaaQualityLevels - 1) : 0;
+	gpsDesc.SampleMask = UINT_MAX;
+	std::vector<ComPtr<ID3D12Resource>> updateBuffers(_scene->_models.size());
+	for (size_t i = 0; i < _scene->_models.size(); i++)
+	{
+		auto& model = _scene->_models[i];
+		InitializeModel(model, updateBuffers[i].GetAddressOf(), gpsDesc);
+		_lastError = _device->CreateGraphicsPipelineState(&gpsDesc, IID_PPV_ARGS(_scene->_gpStates[i].GetAddressOf()));
+		RND_ASSERT;
+	}
 	_lastError = _commandList->Close();
 	RND_ASSERT;
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
-
-	_lastError = _swapChain->Present(0, 0);
-	RND_ASSERT;
-
-	FlushCommandQueue();
-	return true;
-}
-
-void Render::InitializeScene(Scene* scene)
-{
-	_scene = scene;
-	std::vector<ComPtr<ID3D12Resource>> updateBuffers(_scene->Models.size());
-	for (size_t i = 0; i < _scene->Models.size(); i++)
-		InitializeModel(_scene->Models[i], updateBuffers[i].GetAddressOf());
 	FlushCommandQueue();
 }
-
-void Render::TestInit()
-{
-	std::vector<Vertex0> vs(3);
-	vs[0].Position = { 0.0f, 0.5f, -1.0f };
-	vs[1].Position = { -0.5f, -0.5f, -1.0f };
-	vs[1].Position = { 0.5f, -0.5f, -1.0f };
-	vs[0].Color = { 1.0f, 0.0f, 0.0f, 1.0f };
-	vs[1].Color = { 0.0f, 1.0f, 0.0f, 1.0f };
-	vs[2].Color = { 0.0f, 0.0f, 1.0f, 1.0f };
-	ComPtr<ID3D12Resource> ubuf;
-	InitializeVBuffer(testVBuf, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST, vs, ubuf.GetAddressOf());
-
-	_commandList->Close();
-	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
-	_commandQueue->ExecuteCommandLists(1, cmdLists);
-	FlushCommandQueue();
-	_commandList->Reset(_commandAlloc.Get(), nullptr);
-}
-
-void Render::TestDraw()
-{
-	_commandList->IASetPrimitiveTopology(testVBuf.GetPrimitiveTopology());
-	D3D12_VERTEX_BUFFER_VIEW rbVs[] = { testVBuf.GetVertexBufferView() };
-	_commandList->IASetVertexBuffers(0, 1, rbVs);
-	_commandList->DrawInstanced(testVBuf.GetNumVertices(), 1, 0, 0);
-}
-
 
 void Render::InitializeVBuffer(VBuffer& buf, D3D12_PRIMITIVE_TOPOLOGY topology, D3D12_INPUT_LAYOUT_DESC inputLayoutDesc, size_t vertexByteSize, UINT64 numVertices, const void* initData, ID3D12Resource** uploadBuffer)
 {
@@ -266,7 +229,7 @@ void Render::InitializeVBuffer(VBuffer& buf, D3D12_PRIMITIVE_TOPOLOGY topology, 
 	buf._vbView.BufferLocation = buf._buf->GetGPUVirtualAddress();
 	buf._vbView.SizeInBytes = buf._byteSize;
 	buf._vbView.StrideInBytes = buf._vertexSize;
-	
+
 }
 
 void Render::InitializeSBuffer(SBuffer& buf, UINT64 byteSize, const void* initData, ID3D12Resource** uploadBuffer)
@@ -332,20 +295,87 @@ void Render::CompileShader(Shader& shader, E_ShaderStage stage)
 	unsigned compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 	ComPtr<ID3DBlob> errors;
 	_lastError = D3DCompileFromFile(shader._fileName.c_str(),
-									nullptr,
-									D3D_COMPILE_STANDARD_FILE_INCLUDE,
-									shader._entryPointName.c_str(),
-									Shader::ShaderVersions[stage],
-									compileFlags,
-									0,
-									shader._byteCode.GetAddressOf(),
-									errors.GetAddressOf());
+		nullptr,
+		D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		shader._entryPointName.c_str(),
+		Shader::ShaderVersions[stage],
+		compileFlags,
+		0,
+		shader._byteCode.GetAddressOf(),
+		errors.GetAddressOf());
 	RND_ASSERT;
 	if (errors != NULL)
 		OutputDebugStringA((char*)errors->GetBufferPointer());
 }
 
+bool Render::Draw()
+{
+	_lastError = _commandAlloc->Reset();
+	RND_ASSERT;
+	_lastError = _commandList->Reset(_commandAlloc.Get(), _scene->_gpStates[0].Get());
+	RND_ASSERT;
 
+	auto bbt1 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	_commandList->ResourceBarrier(1, &bbt1);
+	_commandList->RSSetViewports(1, &_viewportRect);
+	_commandList->RSSetScissorRects(1, &_scissorsRect);
+	_commandList->ClearRenderTargetView(GetBackBufferDesc(), BB_CLEAR_COLOR, 0, NULL);
+	_commandList->ClearDepthStencilView(GetDepthStencilBufDesc(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, NULL);
+	auto bbd = GetBackBufferDesc();
+	auto dsb = GetDepthStencilBufDesc();
+	_commandList->OMSetRenderTargets(1, &bbd, true, &dsb);
+	for (int i = 0; i < _scene->_models.size(); i++)
+	{
+		auto& model = _scene->_models[i];
+		_commandList->IASetPrimitiveTopology(model.GetPrimitiveTopology());
+		D3D12_VERTEX_BUFFER_VIEW rbVs[] = { model.GetVertexBufferView() };
+		_commandList->IASetVertexBuffers(0, 1, rbVs);
+		_commandList->SetGraphicsRootSignature(model._rootSignature.Get());
+		_commandList->SetPipelineState(_scene->_gpStates[i].Get());
+		_commandList->DrawInstanced(model.GetNumVertices(),	1, 0, 0);
+	}
+	auto bbt2 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+	_commandList->ResourceBarrier(1, &bbt2);
+	_backBufferId = (_backBufferId + 1 < SC_NUM_BUFFERS) ? _backBufferId + 1 : 0;
+
+	_lastError = _commandList->Close();
+	RND_ASSERT;
+	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
+	_commandQueue->ExecuteCommandLists(1, cmdLists);
+
+	_lastError = _swapChain->Present(0, 0);
+	RND_ASSERT;
+
+	FlushCommandQueue();
+	return true;
+}
+
+void Render::TestInit()
+{
+	std::vector<Vertex0> vs(3);
+	vs[0].Position = { 0.0f, 0.5f, -1.0f };
+	vs[1].Position = { -0.5f, -0.5f, -1.0f };
+	vs[1].Position = { 0.5f, -0.5f, -1.0f };
+	vs[0].Color = { 1.0f, 0.0f, 0.0f, 1.0f };
+	vs[1].Color = { 0.0f, 1.0f, 0.0f, 1.0f };
+	vs[2].Color = { 0.0f, 0.0f, 1.0f, 1.0f };
+	ComPtr<ID3D12Resource> ubuf;
+	InitializeVBuffer(testVBuf, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST, vs, ubuf.GetAddressOf());
+
+	_commandList->Close();
+	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
+	_commandQueue->ExecuteCommandLists(1, cmdLists);
+	FlushCommandQueue();
+	_commandList->Reset(_commandAlloc.Get(), nullptr);
+}
+
+void Render::TestDraw()
+{
+	_commandList->IASetPrimitiveTopology(testVBuf.GetPrimitiveTopology());
+	D3D12_VERTEX_BUFFER_VIEW rbVs[] = { testVBuf.GetVertexBufferView() };
+	_commandList->IASetVertexBuffers(0, 1, rbVs);
+	_commandList->DrawInstanced(testVBuf.GetNumVertices(), 1, 0, 0);
+}
 
 void Render::FlushCommandQueue()
 {
@@ -371,18 +401,30 @@ ID3D12Resource* Render::GetBackBuffer()
 
 D3D12_CPU_DESCRIPTOR_HANDLE Render::GetBackBufferDesc()
 {
-	return GetScBufDesc(_backBufferId);
+	return GetScreenBufDesc(_backBufferId);
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Render::GetScBufDesc(UINT numBuf = 0)
+D3D12_CPU_DESCRIPTOR_HANDLE Render::GetScreenBufDesc(UINT numBuf = 0)
 {
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
-	if (numBuf > 0)
-		rtvHandle.Offset(numBuf, _rtvDescSize);
-	return rtvHandle;
+	return CD3DX12_CPU_DESCRIPTOR_HANDLE(  _rtvHeap->GetCPUDescriptorHandleForHeapStart(),
+											numBuf,
+											_rtvDescSize);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Render::GetDepthStencilBufDesc()
 {
 	return D3D12_CPU_DESCRIPTOR_HANDLE(_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+}
+
+bool Render::ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpsDesc)
+{
+	/*std::size_t hash = 0;
+	boost::hash_combine(hash, gpsDesc.pRootSignature);
+	boost::hash_combine(hash, gpsDesc.DepthStencilState);
+	boost::hash_combine(hash, gpsDesc.BlendState);
+	boost::hash_combine(hash, gpsDesc.DSVFormat);
+	boost::hash_combine(hash, gpsDesc.NumRenderTargets);
+	boost::hash_combine(hash, gpsDesc.RasterizerState);*/
+
+	return true;
 }

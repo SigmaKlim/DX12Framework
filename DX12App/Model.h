@@ -2,10 +2,12 @@
 #include <d3d12.h>
 #include "d3dx12.h"
 #include <vector>
+#include <boost/container_hash/hash.hpp>
 
 #include "Vertex.h"
 #include "VBuffer.h"
 #include "Shader.h"
+#include "Helper.h"
 
 using namespace Microsoft::WRL;
 
@@ -21,12 +23,16 @@ public:
 	D3D12_PRIMITIVE_TOPOLOGY	GetPrimitiveTopology() const;
 	D3D12_INPUT_LAYOUT_DESC		GetInputLayoutDesc() const;
 	D3D12_VERTEX_BUFFER_VIEW	GetVertexBufferView() const;
-
+	//Checks if gpsDesc hash coincides with the cached hash. Modifies the cached hash on mismatch. (only model parameters of the desc are compared)
+	bool ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC gpsDesc);
 private:
 	std::vector<VERTEX>			_vertices;
 	D3D12_PRIMITIVE_TOPOLOGY	_topology;
 	VBufferT<VERTEX>			_vBuf;
 	Shader						_shaders[E_ShaderStage::COUNT];
+	ComPtr<ID3D12RootSignature> _rootSignature;
+
+	std::size_t					_gpsHash; //only the model part
 	friend class Render;
 };
 
@@ -40,7 +46,7 @@ inline Model<VERTEX>::Model(const std::vector<VERTEX>& vertices, D3D12_PRIMITIVE
 	for (int i = 0; i < E_ShaderStage::COUNT; i++)
 	{
 		bool compileOnline = shaderData.CompileOnlineFlags & (1 << i);
-		_shaders[i] = Shader(compileOnline, shaderData.FileNames[i], shaderData.EntryPointNames[i]);
+		_shaders[i] = Shader(compileOnline, shaderData.FilePaths[i], shaderData.EntryPointNames[i]);
 	}
 }
 
@@ -72,4 +78,22 @@ template<typename VERTEX>
 inline D3D12_VERTEX_BUFFER_VIEW Model<VERTEX>::GetVertexBufferView() const
 {
 	return _vBuf.GetVertexBufferView();
+}
+
+
+template<typename VERTEX>
+inline bool Model<VERTEX>::ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC gpsDesc)
+{
+	//size_t hash = 0;
+	//boost::hash_combine(hash, gpsDesc.InputLayout);
+	//boost::hash_combine(hash, gpsDesc.PrimitiveTopologyType);
+	//for (int i = 0; i < E_ShaderStage::SHADER_STAGES_MAX_NUM; i++)
+	//{
+	//	boost::hash_combine(hash, Helper::GetShader(gpsDesc, (E_ShaderStage)i).pShaderBytecode);
+	//	boost::hash_combine(hash, Helper::GetShader(gpsDesc, (E_ShaderStage)i).BytecodeLength);
+	//}
+	//if (hash == _gpsHash)
+	//	return true;
+	//_gpsHash = hash;
+	return true;
 }

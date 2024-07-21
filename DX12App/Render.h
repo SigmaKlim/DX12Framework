@@ -9,6 +9,8 @@
 #include "Model.h"
 #include "Shader.h"
 
+#define RND_ASSERT assert(_lastError == S_OK)
+
 using namespace Microsoft::WRL;
 class SBuffer;
 class VBuffer;
@@ -21,17 +23,16 @@ public:
 	Render(unsigned wndWidth, unsigned wndHeight);
 	~Render();
 	bool InitializeRender(HWND hWindow);
-	bool Draw();
-
 	void InitializeScene(Scene* scene);
 
+	bool Draw();
 private:
 	void TestInit();
 	void TestDraw();
 
 
 	template<typename VERTEX>
-	void InitializeModel(Model<VERTEX>& model, ID3D12Resource** uploadBuffer);
+	void InitializeModel(Model<VERTEX>& model, ID3D12Resource** uploadBuffer, D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpsDesc);
 	
 	//Caller is responsible for releasing upload buffer after the target buffer has been created.
 	template <typename VERTEX>
@@ -46,8 +47,10 @@ private:
 	void FlushCommandQueue();
 	ID3D12Resource* GetBackBuffer(); 
 	D3D12_CPU_DESCRIPTOR_HANDLE GetBackBufferDesc();
-	D3D12_CPU_DESCRIPTOR_HANDLE GetScBufDesc(UINT numBuf);
+	D3D12_CPU_DESCRIPTOR_HANDLE GetScreenBufDesc(UINT numBuf);
 	D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilBufDesc();
+	bool ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpsDesc);
+
 	unsigned _wndWidth, _wndHeight;
 	HWND _hWindow = HWND();
 
@@ -63,6 +66,7 @@ private:
 	ComPtr<IDXGISwapChain>				_swapChain;
 	ComPtr<ID3D12DescriptorHeap>		_rtvHeap; //note that we only render to back buffer, we will need to modify code when we add render to texture
 	ComPtr<ID3D12DescriptorHeap>		_dsvHeap;
+	ComPtr<ID3D12DescriptorHeap>		_cbvHeap;
 
 	static const unsigned SC_NUM_BUFFERS = 2;
 	unsigned _backBufferId = 0;
@@ -86,22 +90,59 @@ private:
 
 	UINT64 _currentFence = 0;
 
-	D3D12_VIEWPORT	_viewportRect;
-	D3D12_RECT		_scissorsRect;
+	//render pass params
+	D3D12_VIEWPORT				_viewportRect;
+	D3D12_RECT					_scissorsRect;
+	D3D12_RASTERIZER_DESC		_rasterizerState;
+	D3D12_BLEND_DESC			_blendState;
+	D3D12_DEPTH_STENCIL_DESC	_dsState;
+	size_t						_gpsHash; //only render pass paramaters hash
 
 	Scene* _scene;
 };
 
-
 template<typename VERTEX>
-inline void Render::InitializeModel(Model<VERTEX>& model, ID3D12Resource** uploadBuffer)
+inline void Render::InitializeModel(Model<VERTEX>& model, ID3D12Resource** uploadBuffer, D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpsDesc)
 {
+#pragma region Compile or load shaders
 	InitializeVBuffer(model._vBuf, model._topology, model._vertices, uploadBuffer);
 	for (int i = 0; i < E_ShaderStage::COUNT; i++)
 		if (model._shaders[i]._compileOnline == true)
 			CompileShader(model._shaders[i], (E_ShaderStage)i);
 		else
 			LoadShaderBinaryData(model._shaders[i]);
+#pragma endregion
+#pragma region Create Root Signature
+	//temp: root signature
+	D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
+	rootSignatureDesc.NumParameters = 0;
+	rootSignatureDesc.pParameters = nullptr;
+	rootSignatureDesc.NumStaticSamplers = 0;
+	rootSignatureDesc.pStaticSamplers = nullptr;
+	rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	ComPtr<ID3DBlob> signatureBlob;
+	ComPtr<ID3DBlob> errorBlob;
+	_lastError = D3D12SerializeRootSignature(
+		&rootSignatureDesc,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		&signatureBlob,
+		&errorBlob);
+	RND_ASSERT;
+	_lastError = _device->CreateRootSignature(0,
+		signatureBlob->GetBufferPointer(),
+		signatureBlob->GetBufferSize(),
+		IID_PPV_ARGS(model._rootSignature.GetAddressOf()));
+	RND_ASSERT;
+#pragma endregion
+#pragma region Initialize Pipeline State
+	gpsDesc.InputLayout = model.GetInputLayoutDesc();
+	gpsDesc.PrimitiveTopologyType = Helper::ToTopologyType(model.GetPrimitiveTopology());
+	gpsDesc.VS.pShaderBytecode = (BYTE*)model._shaders[E_ShaderStage::eVertex].GetByteCode();
+	gpsDesc.VS.BytecodeLength = model._shaders[E_ShaderStage::eVertex].GetByteCodeLength();
+	gpsDesc.PS.pShaderBytecode = (BYTE*)model._shaders[E_ShaderStage::ePixel].GetByteCode();
+	gpsDesc.PS.BytecodeLength = model._shaders[E_ShaderStage::ePixel].GetByteCodeLength();
+	gpsDesc.pRootSignature = model._rootSignature.Get();
+#pragma endregion
 }
 
 template<typename VERTEX>
@@ -115,3 +156,5 @@ inline void Render::InitializeVBuffer(VBufferT<VERTEX>& buf, D3D12_PRIMITIVE_TOP
 						vertices.data(),
 						uploadBuffer);
 }
+
+#undef RND_ASSERT
