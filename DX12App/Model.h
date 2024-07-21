@@ -2,7 +2,6 @@
 #include <d3d12.h>
 #include "d3dx12.h"
 #include <vector>
-#include <boost/container_hash/hash.hpp>
 
 #include "Vertex.h"
 #include "VBuffer.h"
