@@ -136,7 +136,7 @@ inline void Render::InitializeModel(Model<VERTEX>& model, ID3D12Resource** uploa
 #pragma endregion
 #pragma region Initialize Pipeline State
 	gpsDesc.InputLayout = model.GetInputLayoutDesc();
-	gpsDesc.PrimitiveTopologyType = Helper::ToTopologyType(model.GetPrimitiveTopology());
+	gpsDesc.PrimitiveTopologyType = RenderHelper::ToTopologyType(model.GetPrimitiveTopology());
 	gpsDesc.VS.pShaderBytecode = (BYTE*)model._shaders[E_ShaderStage::eVertex].GetByteCode();
 	gpsDesc.VS.BytecodeLength = model._shaders[E_ShaderStage::eVertex].GetByteCodeLength();
 	gpsDesc.PS.pShaderBytecode = (BYTE*)model._shaders[E_ShaderStage::ePixel].GetByteCode();

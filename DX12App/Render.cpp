@@ -171,6 +171,7 @@ bool Render::InitializeRender(HWND hWindow)
 #pragma endregion
 #pragma region Initialize Rasterizer State
 	_rasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	//_rasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 #pragma endregion
 #pragma region Initialize Blend State
 	_blendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);

@@ -1,9 +1,16 @@
 #pragma once
+#include <unordered_map>
+
 #include "App.h"
 #include "Render.h"
 #include "Timer.h"
 #include <string>
 #include "Scene.h"
+
+extern std::unordered_map<std::string, std::string> commandLineArgs;
+void ParseCommandLineArgs(char** argv);
+
+
 class Engine
 {
 public:

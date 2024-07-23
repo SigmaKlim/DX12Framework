@@ -2,11 +2,12 @@
 #include <d3d12.h>
 #include "d3dx12.h"
 #include <cassert>
+#include <string>
 #include "Shader.h"
 
 using namespace Microsoft::WRL;
 
-class Helper
+class RenderHelper
 {
 public:
     inline static D3D12_PRIMITIVE_TOPOLOGY_TYPE ToTopologyType(D3D12_PRIMITIVE_TOPOLOGY topology)
@@ -45,5 +46,14 @@ public:
             default:
                 assert(0);
         }
+    }
+};
+
+class GeneralHelper
+{
+public:
+    inline static std::wstring ToWstring(const std::string& str)
+    {
+        return std::wstring(str.begin(), str.end());
     }
 };
