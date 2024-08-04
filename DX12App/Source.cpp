@@ -32,7 +32,7 @@ int main(int argc, char** argv)
 	sid.FilePaths = { projectDir + L"VsSimple.hlsl", projectDir + L"PsSimple.hlsl" };
 	sid.EntryPointNames = { "main", "main" };
 	
-	scene.AddModel(Model0(vs, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST, sid));
+	scene.AddModel(std::make_unique<Model0>(vs, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST, sid));
 	engine.InitializeScene(&scene);
 	//
 

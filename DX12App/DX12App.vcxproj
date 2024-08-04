@@ -156,6 +156,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="App.h" />
+    <ClInclude Include="Camera.h" />
     <ClInclude Include="d3dx12.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Hash.h" />
@@ -168,6 +169,8 @@
     <ClInclude Include="Shader.h" />
     <ClInclude Include="SimpleMath.h" />
     <ClInclude Include="Timer.h" />
+    <ClInclude Include="Transform.h" />
+    <ClInclude Include="UploadBuffer.h" />
     <ClInclude Include="VBuffer.h" />
     <ClInclude Include="Vertex.h" />
     <ClInclude Include="VertexProvider.h" />

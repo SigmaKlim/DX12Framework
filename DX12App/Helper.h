@@ -47,6 +47,11 @@ public:
                 assert(0);
         }
     }
+
+    inline static size_t CalculateCBufferByteSize(size_t rawSize)
+    {
+        return (rawSize + 255) & ~255;
+    }
 };
 
 class GeneralHelper
@@ -57,3 +62,11 @@ public:
         return std::wstring(str.begin(), str.end());
     }
 };
+
+
+#define RND_ASSERT(command)             \
+if (command != S_OK)                    \
+{                                       \
+    std::cout << command << std::endl;  \
+    assert(0);                          \
+}                                       

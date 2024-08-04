@@ -1,6 +1,6 @@
 #include "SBuffer.h"
 #include <cassert>
-#define RND_ASSERT assert(lastError == S_OK)
+//#define RND_ASSERT assert(lastError == S_OK)
 SBuffer::SBuffer(E_BufType bufType) : _type(bufType)
 {
 }

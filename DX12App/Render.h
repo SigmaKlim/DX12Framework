@@ -8,10 +8,12 @@
 #include "Scene.h"
 #include "Model.h"
 #include "Shader.h"
-
-#define RND_ASSERT assert(_lastError == S_OK)
+#include "Camera.h"
+//#define RND_ASSERT assert(_lastError == S_OK)
 
 using namespace Microsoft::WRL;
+using namespace DirectX::SimpleMath;
+
 class SBuffer;
 class VBuffer;
 template <typename VERTEX>
@@ -51,10 +53,13 @@ private:
 	D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilBufDesc();
 	bool ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpsDesc);
 
-	unsigned _wndWidth, _wndHeight;
-	HWND _hWindow = HWND();
+	void MakeProjMatrix(Matrix& matrix);
 
-	HRESULT _lastError;
+	unsigned _wndWidth, _wndHeight;
+
+	DirectX::SimpleMath::Matrix proj;
+
+	HWND _hWindow = HWND();
 
 	ComPtr<ID3D12Debug>					_debugController;
 	ComPtr<IDXGIFactory4>				_factory;
@@ -99,6 +104,7 @@ private:
 	size_t						_gpsHash; //only render pass paramaters hash
 
 	Scene* _scene;
+	Camera camera;
 };
 
 template<typename VERTEX>
@@ -112,27 +118,36 @@ inline void Render::InitializeModel(Model<VERTEX>& model, ID3D12Resource** uploa
 		else
 			LoadShaderBinaryData(model._shaders[i]);
 #pragma endregion
+#pragma region Initialize transform constant buffer
+	model._transformCB.Initialize(_device.Get(), 1, E_UpdateBufferType::eConstant);
+	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+	cbvDesc.BufferLocation = model._transformCB.GetResource()->GetGPUVirtualAddress();
+	cbvDesc.SizeInBytes = RenderHelper::CalculateCBufferByteSize(sizeof(ModelTransform));
+	_device->CreateConstantBufferView(&cbvDesc, _cbvHeap->GetCPUDescriptorHandleForHeapStart());
+#pragma endregion
 #pragma region Create Root Signature
 	//temp: root signature
+	CD3DX12_ROOT_PARAMETER slotRootParameter[1];
+	CD3DX12_DESCRIPTOR_RANGE cbvTable;
+	cbvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+	slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable);
 	D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-	rootSignatureDesc.NumParameters = 0;
-	rootSignatureDesc.pParameters = nullptr;
+	rootSignatureDesc.NumParameters = 1;
+	rootSignatureDesc.pParameters = slotRootParameter;
 	rootSignatureDesc.NumStaticSamplers = 0;
 	rootSignatureDesc.pStaticSamplers = nullptr;
 	rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 	ComPtr<ID3DBlob> signatureBlob;
 	ComPtr<ID3DBlob> errorBlob;
-	_lastError = D3D12SerializeRootSignature(
+	RND_ASSERT(D3D12SerializeRootSignature(
 		&rootSignatureDesc,
 		D3D_ROOT_SIGNATURE_VERSION_1,
 		&signatureBlob,
-		&errorBlob);
-	RND_ASSERT;
-	_lastError = _device->CreateRootSignature(0,
+		&errorBlob));
+	RND_ASSERT(_device->CreateRootSignature(0,
 		signatureBlob->GetBufferPointer(),
 		signatureBlob->GetBufferSize(),
-		IID_PPV_ARGS(model._rootSignature.GetAddressOf()));
-	RND_ASSERT;
+		IID_PPV_ARGS(model._rootSignature.GetAddressOf())));
 #pragma endregion
 #pragma region Initialize Pipeline State
 	gpsDesc.InputLayout = model.GetInputLayoutDesc();
@@ -156,5 +171,3 @@ inline void Render::InitializeVBuffer(VBufferT<VERTEX>& buf, D3D12_PRIMITIVE_TOP
 						vertices.data(),
 						uploadBuffer);
 }
-
-#undef RND_ASSERT

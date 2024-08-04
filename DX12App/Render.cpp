@@ -8,12 +8,15 @@
 #include "Helper.h"
 #include "Hash.h"
 
-#define RND_ASSERT assert(_lastError == S_OK)
+using namespace DirectX::SimpleMath;
+
+//#define RND_ASSERT assert(_lastError == S_OK)
 
 VBuffer0 testVBuf(eGpu);
 
 Render::Render(unsigned wndWidth, unsigned wndHeight) : _wndWidth(wndWidth), _wndHeight(wndHeight)
 {
+	MakeProjMatrix(proj);
 }
 
 Render::~Render()
@@ -24,23 +27,20 @@ Render::~Render()
 
 bool Render::InitializeRender(HWND hWindow)
 {
+	
 	_hWindow = hWindow;
 #pragma region Enable Debug
-	_lastError = D3D12GetDebugInterface(IID_PPV_ARGS(_debugController.GetAddressOf()));
-	RND_ASSERT;
+	RND_ASSERT(D3D12GetDebugInterface(IID_PPV_ARGS(_debugController.GetAddressOf())));
 	_debugController->EnableDebugLayer();
 #pragma endregion
 #pragma region Create Factory
-	_lastError = CreateDXGIFactory1(IID_PPV_ARGS(_factory.GetAddressOf()));
-	RND_ASSERT;
-#pragma endregion
+	RND_ASSERT(CreateDXGIFactory1(IID_PPV_ARGS(_factory.GetAddressOf())));
+	#pragma endregion
 #pragma region Create Device
-	_lastError = D3D12CreateDevice(NULL, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(_device.GetAddressOf()));
-	RND_ASSERT;
+	RND_ASSERT(D3D12CreateDevice(NULL, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(_device.GetAddressOf())));
 #pragma endregion
 #pragma region Create Fence
-	_lastError = _device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(_fence.GetAddressOf()));
-	RND_ASSERT;
+	RND_ASSERT(_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(_fence.GetAddressOf())));
 #pragma endregion
 #pragma region Retrieve Descriptor Sizes
 	_rtvDescSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -53,10 +53,9 @@ bool Render::InitializeRender(HWND hWindow)
 	msQLevels.SampleCount = 4;
 	msQLevels.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
 	msQLevels.NumQualityLevels = 0;
-	_lastError = _device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
+	RND_ASSERT(_device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
 		&msQLevels,
-		sizeof(msQLevels));
-	RND_ASSERT;
+		sizeof(msQLevels)));
 	_4xMsaaQualityLevels = msQLevels.NumQualityLevels;
 	assert(_4xMsaaQualityLevels > 0);
 #pragma endregion
@@ -64,16 +63,13 @@ bool Render::InitializeRender(HWND hWindow)
 	D3D12_COMMAND_QUEUE_DESC cmdQueueDesc = {};
 	cmdQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 	cmdQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	_lastError = _device->CreateCommandQueue(&cmdQueueDesc, IID_PPV_ARGS(_commandQueue.GetAddressOf()));
-	RND_ASSERT;
-	_lastError = _device->CreateCommandAllocator(cmdQueueDesc.Type, IID_PPV_ARGS(_commandAlloc.GetAddressOf()));
-	RND_ASSERT;
-	_lastError = _device->CreateCommandList(0,
+	RND_ASSERT(_device->CreateCommandQueue(&cmdQueueDesc, IID_PPV_ARGS(_commandQueue.GetAddressOf())));
+	RND_ASSERT(_device->CreateCommandAllocator(cmdQueueDesc.Type, IID_PPV_ARGS(_commandAlloc.GetAddressOf())));
+	RND_ASSERT(_device->CreateCommandList(0,
 		cmdQueueDesc.Type,
 		_commandAlloc.Get(),
 		NULL,
-		IID_PPV_ARGS(_commandList.GetAddressOf()));
-	RND_ASSERT;
+		IID_PPV_ARGS(_commandList.GetAddressOf())));
 #pragma endregion
 #pragma region Create Swap Chain
 	DXGI_SWAP_CHAIN_DESC swapDesc;
@@ -91,36 +87,32 @@ bool Render::InitializeRender(HWND hWindow)
 	swapDesc.Windowed = true;
 	swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-	_lastError = _factory->CreateSwapChain(_commandQueue.Get(), &swapDesc, _swapChain.GetAddressOf());
-	RND_ASSERT;
+	RND_ASSERT(_factory->CreateSwapChain(_commandQueue.Get(), &swapDesc, _swapChain.GetAddressOf()));
 #pragma endregion
 #pragma region Create RTV and DSV Descriptor Heaps
-	//D3D12_DESCRIPTOR_HEAP_DESC cbvDesc;
-	//cbvDesc.NumDescriptors = 0;
-	//cbvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	//cbvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	//_lastError = _device->CreateDescriptorHeap(&cbvDesc, IID_PPV_ARGS(_cbvHeap.GetAddressOf()));
-
+	D3D12_DESCRIPTOR_HEAP_DESC cbvDesc;
+	cbvDesc.NumDescriptors = 1;
+	cbvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	cbvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	cbvDesc.NodeMask = 0;
+	RND_ASSERT(_device->CreateDescriptorHeap(&cbvDesc, IID_PPV_ARGS(_cbvHeap.GetAddressOf())));
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
 	rtvHeapDesc.NumDescriptors = SC_NUM_BUFFERS;
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
-	_lastError = _device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(_rtvHeap.GetAddressOf()));
-	RND_ASSERT;
+	RND_ASSERT(_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(_rtvHeap.GetAddressOf())));
 	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
 	dsvHeapDesc.NumDescriptors = 1;
 	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	dsvHeapDesc.NodeMask = 0;
-	_lastError = _device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(_dsvHeap.GetAddressOf()));
-	RND_ASSERT;
+	RND_ASSERT(_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(_dsvHeap.GetAddressOf())));
 #pragma endregion
 #pragma region Create RTVs	
 	for (unsigned i = 0; i < SC_NUM_BUFFERS; i++)
 	{
-		_lastError = _swapChain->GetBuffer(i, IID_PPV_ARGS(_scBuffers[i].GetAddressOf()));
-		RND_ASSERT;
+		RND_ASSERT(_swapChain->GetBuffer(i, IID_PPV_ARGS(_scBuffers[i].GetAddressOf())));
 		_device->CreateRenderTargetView(_scBuffers[i].Get(), NULL, GetScreenBufDesc(i)); //NULL for desc means description of the back buffer will be used
 	}
 #pragma endregion
@@ -142,13 +134,12 @@ bool Render::InitializeRender(HWND hWindow)
 	dsClearVal.DepthStencil.Depth = 1.0f;
 	dsClearVal.DepthStencil.Stencil = 0;
 	CD3DX12_HEAP_PROPERTIES heapP(D3D12_HEAP_TYPE_DEFAULT);
-	_lastError = _device->CreateCommittedResource(	&heapP,
+	RND_ASSERT(_device->CreateCommittedResource(	&heapP,
 													D3D12_HEAP_FLAG_NONE,
 													&dsBufDesc,
 													D3D12_RESOURCE_STATE_COMMON,
 													&dsClearVal,
-													IID_PPV_ARGS(_depthStencilBuffer.GetAddressOf()));
-	RND_ASSERT;
+													IID_PPV_ARGS(_depthStencilBuffer.GetAddressOf())));
 	_device->CreateDepthStencilView(_depthStencilBuffer.Get(), nullptr, GetDepthStencilBufDesc());
 	auto rb = CD3DX12_RESOURCE_BARRIER::Transition(_depthStencilBuffer.Get(),
 													D3D12_RESOURCE_STATE_COMMON,
@@ -181,8 +172,7 @@ bool Render::InitializeRender(HWND hWindow)
 #pragma endregion
 #pragma region Submit Command List
 
-	_lastError = _commandList->Close();
-	RND_ASSERT;
+	RND_ASSERT(_commandList->Close());
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
 
@@ -209,12 +199,10 @@ void Render::InitializeScene(Scene* scene)
 	for (size_t i = 0; i < _scene->_models.size(); i++)
 	{
 		auto& model = _scene->_models[i];
-		InitializeModel(model, updateBuffers[i].GetAddressOf(), gpsDesc);
-		_lastError = _device->CreateGraphicsPipelineState(&gpsDesc, IID_PPV_ARGS(_scene->_gpStates[i].GetAddressOf()));
-		RND_ASSERT;
+		InitializeModel(*model, updateBuffers[i].GetAddressOf(), gpsDesc);
+		RND_ASSERT(_device->CreateGraphicsPipelineState(&gpsDesc, IID_PPV_ARGS(_scene->_gpStates[i].GetAddressOf())));
 	}
-	_lastError = _commandList->Close();
-	RND_ASSERT;
+	RND_ASSERT(_commandList->Close());
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
 	FlushCommandQueue();
@@ -243,14 +231,13 @@ void Render::InitializeSBuffer(SBuffer& buf, UINT64 byteSize, const void* initDa
 	{
 		auto dHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 		auto dBufDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
-		lastError = _device->CreateCommittedResource(
+		RND_ASSERT(_device->CreateCommittedResource(
 			&dHeapProp,
 			D3D12_HEAP_FLAG_NONE,
 			&dBufDesc,
 			D3D12_RESOURCE_STATE_COMMON,
 			nullptr,
-			IID_PPV_ARGS(buf._buf.GetAddressOf()));
-		RND_ASSERT;
+			IID_PPV_ARGS(buf._buf.GetAddressOf())));
 	}
 	else
 		assert(0); //currently only gpu buffers are accessible
@@ -258,14 +245,13 @@ void Render::InitializeSBuffer(SBuffer& buf, UINT64 byteSize, const void* initDa
 	{
 		auto uHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 		auto uBufDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
-		lastError = _device->CreateCommittedResource(
+		RND_ASSERT(_device->CreateCommittedResource(
 			&uHeapProp,
 			D3D12_HEAP_FLAG_NONE,
 			&uBufDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
-			IID_PPV_ARGS(uploadBuffer));
-		RND_ASSERT;
+			IID_PPV_ARGS(uploadBuffer)));
 		D3D12_SUBRESOURCE_DATA subResourceData = {};
 		subResourceData.pData = initData;
 		subResourceData.RowPitch = byteSize;
@@ -295,7 +281,7 @@ void Render::CompileShader(Shader& shader, E_ShaderStage stage)
 {
 	unsigned compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 	ComPtr<ID3DBlob> errors;
-	_lastError = D3DCompileFromFile(shader._fileName.c_str(),
+	RND_ASSERT(D3DCompileFromFile(shader._fileName.c_str(),
 		nullptr,
 		D3D_COMPILE_STANDARD_FILE_INCLUDE,
 		shader._entryPointName.c_str(),
@@ -303,18 +289,16 @@ void Render::CompileShader(Shader& shader, E_ShaderStage stage)
 		compileFlags,
 		0,
 		shader._byteCode.GetAddressOf(),
-		errors.GetAddressOf());
-	RND_ASSERT;
+		errors.GetAddressOf()));
+	
 	if (errors != NULL)
 		OutputDebugStringA((char*)errors->GetBufferPointer());
 }
 
 bool Render::Draw()
 {
-	_lastError = _commandAlloc->Reset();
-	RND_ASSERT;
-	_lastError = _commandList->Reset(_commandAlloc.Get(), _scene->_gpStates[0].Get());
-	RND_ASSERT;
+	RND_ASSERT(_commandAlloc->Reset());
+	RND_ASSERT(_commandList->Reset(_commandAlloc.Get(), _scene->_gpStates[0].Get()));
 
 	auto bbt1 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	_commandList->ResourceBarrier(1, &bbt1);
@@ -328,24 +312,34 @@ bool Render::Draw()
 	for (int i = 0; i < _scene->_models.size(); i++)
 	{
 		auto& model = _scene->_models[i];
-		_commandList->IASetPrimitiveTopology(model.GetPrimitiveTopology());
-		D3D12_VERTEX_BUFFER_VIEW rbVs[] = { model.GetVertexBufferView() };
+		_commandList->IASetPrimitiveTopology(model->GetPrimitiveTopology());
+		D3D12_VERTEX_BUFFER_VIEW rbVs[] = { model->GetVertexBufferView() };
 		_commandList->IASetVertexBuffers(0, 1, rbVs);
-		_commandList->SetGraphicsRootSignature(model._rootSignature.Get());
+		
+		//Setup transform
+		auto positionMatrix = Matrix::CreateTranslation(model->GetPosition());
+		auto rotationMatrix = Matrix::CreateFromQuaternion(model->GetRotation());
+		auto scaleMatrix = Matrix::CreateScale(model->GetScale());
+		auto transform = scaleMatrix * rotationMatrix * positionMatrix;
+		Matrix view;
+		camera.MakeViewMatrix(view);
+		model->_transformCB.CopyData(0, { transform * view * proj });
+
+		_commandList->SetGraphicsRootSignature(model->_rootSignature.Get());
+		CD3DX12_GPU_DESCRIPTOR_HANDLE cbv(_cbvHeap->GetGPUDescriptorHandleForHeapStart());
+		_commandList->SetGraphicsRootDescriptorTable(0, cbv);
 		_commandList->SetPipelineState(_scene->_gpStates[i].Get());
-		_commandList->DrawInstanced(model.GetNumVertices(),	1, 0, 0);
+		_commandList->DrawInstanced(model->GetNumVertices(),	1, 0, 0);
 	}
 	auto bbt2 = CD3DX12_RESOURCE_BARRIER::Transition(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 	_commandList->ResourceBarrier(1, &bbt2);
 	_backBufferId = (_backBufferId + 1 < SC_NUM_BUFFERS) ? _backBufferId + 1 : 0;
 
-	_lastError = _commandList->Close();
-	RND_ASSERT;
+	RND_ASSERT(_commandList->Close());
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
 
-	_lastError = _swapChain->Present(0, 0);
-	RND_ASSERT;
+	RND_ASSERT(_swapChain->Present(0, 0));
 
 	FlushCommandQueue();
 	return true;
@@ -367,7 +361,7 @@ void Render::TestInit()
 	ID3D12CommandList* cmdLists[] = { _commandList.Get() };
 	_commandQueue->ExecuteCommandLists(1, cmdLists);
 	FlushCommandQueue();
-	_commandList->Reset(_commandAlloc.Get(), nullptr);
+	RND_ASSERT(_commandList->Reset(_commandAlloc.Get(), nullptr));
 }
 
 void Render::TestDraw()
@@ -381,14 +375,12 @@ void Render::TestDraw()
 void Render::FlushCommandQueue()
 {
 	_currentFence++;
-	_lastError = _commandQueue->Signal(_fence.Get(), _currentFence); //Submit to GPU a command to increment fence value
-	RND_ASSERT;
+	RND_ASSERT(_commandQueue->Signal(_fence.Get(), _currentFence)); //Submit to GPU a command to increment fence value
 	auto completedFence = _fence->GetCompletedValue();
 	if (completedFence < _currentFence) //unnecessary???
 	{
 		HANDLE eventHandle = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
-		_lastError = _fence->SetEventOnCompletion(_currentFence, eventHandle); //Assign the event to fire when fence reaches necessary value.
-		RND_ASSERT;
+		RND_ASSERT(_fence->SetEventOnCompletion(_currentFence, eventHandle)); //Assign the event to fire when fence reaches necessary value.
 		WaitForSingleObject(eventHandle, INFINITE); //Wait until the assigned event is fired.
 		CloseHandle(eventHandle);
 	}
@@ -428,4 +420,9 @@ bool Render::ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gps
 	boost::hash_combine(hash, gpsDesc.RasterizerState);*/
 
 	return true;
+}
+
+void Render::MakeProjMatrix(Matrix& matrix)
+{
+	matrix = DirectX::SimpleMath::Matrix::CreatePerspectiveOffCenter(_wndWidth / -2.0f, _wndWidth / 2.0f, _wndHeight / -2.0f, _wndHeight / 2.0f, 1.0f, 1000.0f);
 }

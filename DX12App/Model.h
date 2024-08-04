@@ -7,8 +7,11 @@
 #include "VBuffer.h"
 #include "Shader.h"
 #include "Helper.h"
+#include "UploadBuffer.h"
+#include "Transform.h"
 
 using namespace Microsoft::WRL;
+using namespace DirectX::SimpleMath;
 
 template <typename VERTEX>
 class Model
@@ -16,12 +19,16 @@ class Model
 
 public:
 	Model(const std::vector<VERTEX>& vertices, D3D12_PRIMITIVE_TOPOLOGY topology = D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ShaderInitData shaderData = {});
-
+	Model(const Model& other) = delete;
+	Model& operator=(const Model& other) = delete;
 	unsigned					GetNumVertices() const;
 	size_t						GetVertexByteSize() const;
 	D3D12_PRIMITIVE_TOPOLOGY	GetPrimitiveTopology() const;
 	D3D12_INPUT_LAYOUT_DESC		GetInputLayoutDesc() const;
 	D3D12_VERTEX_BUFFER_VIEW	GetVertexBufferView() const;
+	Vector3						GetPosition() const;
+	Quaternion					GetRotation() const;
+	Vector3						GetScale() const;
 	//Checks if gpsDesc hash coincides with the cached hash. Modifies the cached hash on mismatch. (only model parameters of the desc are compared)
 	bool ValidatePipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC gpsDesc);
 private:
@@ -29,7 +36,12 @@ private:
 	D3D12_PRIMITIVE_TOPOLOGY	_topology;
 	VBufferT<VERTEX>			_vBuf;
 	Shader						_shaders[E_ShaderStage::COUNT];
+	UploadBuffer<ModelTransform> _transformCB;
 	ComPtr<ID3D12RootSignature> _rootSignature;
+
+	DirectX::SimpleMath::Vector3	_position = DirectX::SimpleMath::Vector3::Zero;
+	DirectX::SimpleMath::Quaternion _rotation = DirectX::SimpleMath::Quaternion::Identity;
+	DirectX::SimpleMath::Vector3	_scale = DirectX::SimpleMath::Vector3::One;
 
 	std::size_t					_gpsHash; //only the model part
 	friend class Render;
@@ -77,6 +89,24 @@ template<typename VERTEX>
 inline D3D12_VERTEX_BUFFER_VIEW Model<VERTEX>::GetVertexBufferView() const
 {
 	return _vBuf.GetVertexBufferView();
+}
+
+template<typename VERTEX>
+inline Vector3 Model<VERTEX>::GetPosition() const
+{
+	return _position;
+}
+
+template<typename VERTEX>
+inline Quaternion Model<VERTEX>::GetRotation() const
+{
+	return _rotation;
+}
+
+template<typename VERTEX>
+inline Vector3 Model<VERTEX>::GetScale() const
+{
+	return _scale;
 }
 
 
